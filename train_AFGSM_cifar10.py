@@ -91,46 +91,91 @@ elif args.attack_method=="FGSM":
             clip_min=0.0, clip_max=1.0,eps=args.epsilon,targeted=False)
 
 PGD_adversary = LinfPGDAttack(model,loss_fn=nn.CrossEntropyLoss(reduction="sum"),eps=0.03137,nb_iter=10,eps_iter=0.007,rand_init=True,clip_min=0.0,clip_max=1.0,targeted=False)
-prev = torch.ones([50000,3,32,32])
 
-def train(args, model, device, train_loader, optimizer, epoch):
+def train(args, model, device, cifar_nat_x,cifar_x,cifar_y, optimizer, epoch):
     model.train()
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
+    num_of_example = 50000
+    batch_size = args.batch_size
+    cur_order = np.random.permutation(num_of_example)
+    iter_num = num_of_example // batch_size + (0 if num_of_example % batch_size == 0 else 1)
+    batch_idx = -batch_size
 
-        # reset prev
-        if epoch > 71:
-            if (epoch-72)%10 == 0:
-                prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]=data.cpu()
-        elif epoch > 21:
-            if (epoch-22)%5 == 0:
-                prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]=data.cpu()
-        else:
-            if (epoch-1)%3 == 0:
-                prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]=data.cpu()
-        optimizer.zero_grad()
-        batch_prev = prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size].to(device)
+    for i in range(iter_num):
+        # get shuffled data
+        batch_idx = (batch_idx + batch_size) if batch_idx + batch_size < num_of_example else 0
+        x_batch = cifar_x[cur_order[batch_idx:min(num_of_example, batch_idx + batch_size)]].to(device)
+        x_nat_batch = cifar_nat_x[cur_order[batch_idx:min(num_of_example, batch_idx + batch_size)]].to(device)
+        y_batch = cifar_y[cur_order[batch_idx:min(num_of_example, batch_idx + batch_size)]].to(device)
+
+        batch_size = y_batch.shape[0]
 
         # attack
         with ctx_noparamgrad_and_eval(model):
-            adv_data = adversary.perturb(data,target,epoch,batch_prev)
-            prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size] = adv_data.cpu() # update prev
+            adv_data = adversary.perturb(x_nat_batch,y_batch,epoch,x_batch)
 
-        loss = F.cross_entropy(model(adv_data),target,reduction='elementwise_mean')
+
+        # update cifar_x
+        cifar_x[cur_order[batch_idx:min(num_of_example, batch_idx + batch_size)]] = adv_data.clone().detach().cpu()
+
+        # loss backward
+        optimizer.zero_grad()
+        loss = F.cross_entropy(model(adv_data),y_batch,reduction='elementwise_mean')
         loss.backward()
         optimizer.step()
 
         # print max perturbation & min
-        if batch_idx == 0:
-            eta = adv_data - data
+        if i == 0:
+            eta = adv_data - x_nat_batch
             print("max:{}".format(torch.max(eta)))
             print("min:{}".format(torch.min(eta)))
 
         # print progress
-        if batch_idx % args.log_interval == 0:
+        if i % args.log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
-                       100. * batch_idx / len(train_loader), loss.item()))
+                epoch, i * len(x_batch), len(train_loader.dataset),
+                       100. * i / len(train_loader), loss.item()))
+#
+# def train(args, model, device, cifar_nat_x,cifar_x,cifar_y, optimizer, epoch):
+#     model.train()
+#     print("初始扰动的平均值：{}".format(torch.mean(prev)))
+#     for batch_idx, (data, target) in enumerate(train_loader):
+#         data, target = data.to(device), target.to(device)
+#
+#         # reset prev
+#         if epoch > 71:
+#             if (epoch-72)%10 == 0:
+#                 print("reset")
+#                 prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]=data.cpu()
+#         elif epoch > 21:
+#             if (epoch-22)%5 == 0:
+#                 print("reset")
+#                 prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]=data.cpu()
+#         else:
+#             if (epoch-1)%3 == 0:
+#                 print("reset")
+#                 prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]=data.cpu()
+#         optimizer.zero_grad()
+#         batch_prev = prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size].to(device)
+#         # attack
+#         with ctx_noparamgrad_and_eval(model):
+#             adv_data = adversary.perturb(data,target,epoch,batch_prev)
+#         prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size] = adv_data.clone().detach().cpu() # update prev
+#
+#         loss = F.cross_entropy(model(adv_data),target,reduction='elementwise_mean')
+#         loss.backward()
+#         optimizer.step()
+#
+#         # print max perturbation & min
+#         if batch_idx == 0:
+#             eta = adv_data - data
+#             print("max:{}".format(torch.max(eta)))
+#             print("min:{}".format(torch.min(eta)))
+#
+#         # print progress
+#         if batch_idx % args.log_interval == 0:
+#             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+#                 epoch, batch_idx * len(data), len(train_loader.dataset),
+#                        100. * batch_idx / len(train_loader), loss.item()))
 
 def eval_train(model, device, train_loader):
     model.eval()
@@ -197,12 +242,28 @@ def adjust_learning_rate(optimizer, epoch):
 
 
 def main():
+    prev = torch.ones([50000, 3, 32, 32])
+    cifar_x, cifar_y = load_cifar10_data()
+    cifar_nat_x = cifar_x.clone()
+    # cifar_x = cifar_x.detach() + 0.001 * torch.randn(cifar_x.shape).detach() #random init
+
     for epoch in range(1, args.epochs + 1):
         # adjust learning rate for SGD
         adjust_learning_rate(optimizer, epoch)
 
+        # reset
+        if epoch > 71:
+            if (epoch-72)%10 == 0:
+                cifar_x = cifar_nat_x.clone()
+        elif epoch > 21:
+            if (epoch-22)%5 == 0:
+                cifar_x = cifar_nat_x.clone()
+        else:
+            if (epoch-1)%3 == 0:
+                cifar_x = cifar_nat_x.clone()
+
         # adversarial training
-        train(args, model, device, train_loader, optimizer, epoch)
+        train(args, model, device, cifar_nat_x,cifar_x,cifar_y, optimizer, epoch)
 
         # evaluation on natural examples
         print('================================================================')
@@ -217,6 +278,13 @@ def main():
             torch.save(optimizer.state_dict(),
                        os.path.join(model_dir, 'opt-res18-checkpoint_epoch{}.tar'.format(epoch)))
 
+def load_cifar10_data():
+    data_ = torch.ones([50000, 3, 32, 32])
+    target_ = torch.zeros([50000])
+    for batch_idx,(data, target) in enumerate(train_loader):
+        data_[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size] = data
+        target_[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size] = target
+    return data_,target_.long()
 
 if __name__ == '__main__':
     main()

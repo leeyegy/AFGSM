@@ -41,7 +41,9 @@ class AFGSM():
 
     def perturb(self,X,y,epoch,prev):
         step_size = self.step_size_schedule(epoch)
-        X_adv = Variable(prev.data, requires_grad=True)
+        # print("扰动步长:{}".format(step_size))
+        # print("初始的扰动范围max:{}".format(torch.max(prev-X)))
+        X_adv = Variable(prev.clone().detach().data, requires_grad=True)
         opt = optim.SGD([X_adv], lr=1e-3)
         opt.zero_grad()
         with torch.enable_grad():
