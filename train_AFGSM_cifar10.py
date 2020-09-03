@@ -134,48 +134,6 @@ def train(args, model, device, cifar_nat_x,cifar_x,cifar_y, optimizer, epoch):
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, i * len(x_batch), len(train_loader.dataset),
                        100. * i / len(train_loader), loss.item()))
-#
-# def train(args, model, device, cifar_nat_x,cifar_x,cifar_y, optimizer, epoch):
-#     model.train()
-#     print("初始扰动的平均值：{}".format(torch.mean(prev)))
-#     for batch_idx, (data, target) in enumerate(train_loader):
-#         data, target = data.to(device), target.to(device)
-#
-#         # reset prev
-#         if epoch > 71:
-#             if (epoch-72)%10 == 0:
-#                 print("reset")
-#                 prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]=data.cpu()
-#         elif epoch > 21:
-#             if (epoch-22)%5 == 0:
-#                 print("reset")
-#                 prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]=data.cpu()
-#         else:
-#             if (epoch-1)%3 == 0:
-#                 print("reset")
-#                 prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size]=data.cpu()
-#         optimizer.zero_grad()
-#         batch_prev = prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size].to(device)
-#         # attack
-#         with ctx_noparamgrad_and_eval(model):
-#             adv_data = adversary.perturb(data,target,epoch,batch_prev)
-#         prev[batch_idx*args.batch_size:(batch_idx+1)*args.batch_size] = adv_data.clone().detach().cpu() # update prev
-#
-#         loss = F.cross_entropy(model(adv_data),target,reduction='elementwise_mean')
-#         loss.backward()
-#         optimizer.step()
-#
-#         # print max perturbation & min
-#         if batch_idx == 0:
-#             eta = adv_data - data
-#             print("max:{}".format(torch.max(eta)))
-#             print("min:{}".format(torch.min(eta)))
-#
-#         # print progress
-#         if batch_idx % args.log_interval == 0:
-#             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-#                 epoch, batch_idx * len(data), len(train_loader.dataset),
-#                        100. * batch_idx / len(train_loader), loss.item()))
 
 def eval_train(model, device, train_loader):
     model.eval()
